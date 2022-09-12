@@ -1,0 +1,16 @@
+#![feature(iter_collect_into)]
+#![feature(extend_one)]
+
+use std::io;
+
+use aufgaben_helfer::loese_aufgabe;
+
+mod a1;
+mod a5;
+mod aufgaben_helfer;
+
+fn main() -> io::Result<()> {
+    //loese_aufgabe(1, a1::a1)?;
+    loese_aufgabe(5, a5::a5)?;
+    Ok(())
+}
