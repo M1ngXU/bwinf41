@@ -7,6 +7,5 @@ edition = "2021"
 
 [dependencies]
 regex = "1.6.0"
-rayon = "1.5.3"
-ethnum = "1.2.2"
+bit-vec = "0.6.3"
 itertools = "0.10.3"

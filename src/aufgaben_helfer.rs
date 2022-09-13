@@ -4,7 +4,7 @@ use std::{
 };
 use std::time::Instant;
 
-static AUFGABEN_DIR: &'static str = "./a";
+static AUFGABEN_DIR: &str = "./a";
 
 pub(crate) fn get_aufgaben(aufgabe: u8) -> io::Result<Vec<(String, String)>> {
     Ok(read_dir(format!("{AUFGABEN_DIR}{aufgabe}"))?
