@@ -26,7 +26,7 @@ pub(crate) fn loese_aufgabe(aufgabe: u8, loeser: impl Fn(String)) -> io::Result<
         println!(r#""{name}":"#);
         let start = Instant::now();
         loeser(teilaufgabe);
-        println!("Duration: {:.3}s", start.elapsed().as_secs_f64());
+        println!("Duration: {}ms", start.elapsed().as_millis());
         println!();
     }
     Ok(())

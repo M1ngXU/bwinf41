@@ -84,11 +84,18 @@ impl Huepfburg {
         }
     }
 
+    fn keine_loesung(self) {
+        println!(
+            "Keine Loesung! (Anzahl der Spruenge bis zu einer bekannten Situation: {})",
+            self.spruenge
+        );
+    }
+
     fn keine_knoten(&self) -> BitVec {
         neue_erreichbare_knoten(self.knoten, [])
     }
 
-    fn am_ziel(&self) -> bool {
+    fn gleicher_erreichbarer_knoten(&self) -> bool {
         self.sasha_erreichbare_knoten()
             .bit_and(self.mika_erreichbare_knoten())
             .any()
@@ -195,12 +202,9 @@ impl Huepfburg {
 pub(crate) fn a5(graph: String) {
     let mut huepfburg: Huepfburg = graph.parse().unwrap();
 
-    while !huepfburg.am_ziel() {
+    while !huepfburg.gleicher_erreichbarer_knoten() {
         if huepfburg.versuche_merken() {
-            println!(
-                "Keine Loesung! (Anzahl der Spruenge bis zu einer bekannten Situation: {})",
-                huepfburg.spruenge
-            );
+            huepfburg.keine_loesung();
             return;
         }
         huepfburg.naechster_sprung();
