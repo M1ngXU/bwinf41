@@ -1,22 +1,27 @@
+use glob::glob;
 use std::fs::read_to_string;
 use std::time::Instant;
-use glob::glob;
+
+fn get_aufgaben() -> impl Iterator<Item = (String, String)> {
+    if std::env::args().nth(1).is_none() {
+        panic!("Die auszuführenden Aufgaben müssen als Cmd-Arg gegeben werden. Glob-Patterns / mehrere Pfade sind möglich.");
+    }
+    std::env::args().skip(1).flat_map(|p| {
+        glob(&p)
+            .expect("Glob pattern fehler")
+            .into_iter()
+            .flatten()
+            .map(|p| {
+                (
+                    read_to_string(&p).expect("Datei konnte nicht gelesen werden."),
+                    p.to_str().unwrap_or_default().to_owned(),
+                )
+            })
+    })
+}
 
 pub fn loese_aufgabe(loeser: impl Fn(String)) {
-    for (teilaufgabe, name) in glob(
-        &std::env::args()
-            .nth(1)
-            .expect("Gib ein Glob Pattern als erstes Argument an."),
-    )
-    .expect("Glob pattern fehler")
-    .into_iter()
-    .flatten()
-    .map(|p| {
-        (
-            read_to_string(&p).expect("Datei konnte nicht gelesen werden."),
-            p.to_str().unwrap_or_default().to_owned(),
-        )
-    }) {
+    for (teilaufgabe, name) in get_aufgaben() {
         println!(r#""{name}":"#);
         let start = Instant::now();
         loeser(teilaufgabe);
