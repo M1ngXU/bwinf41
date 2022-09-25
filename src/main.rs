@@ -1,4 +1,5 @@
 #![deny(clippy::too_many_lines)]
+#![allow(dead_code, unused_variables)]
 
 use std::io;
 
