@@ -1,8 +1,8 @@
+use std::time::Instant;
 use std::{
     fs::{read_dir, read_to_string},
     io,
 };
-use std::time::Instant;
 
 static AUFGABEN_DIR: &str = "./a";
 
@@ -23,7 +23,7 @@ pub(crate) fn get_aufgaben(aufgabe: u8) -> io::Result<Vec<(String, String)>> {
 pub(crate) fn loese_aufgabe(aufgabe: u8, loeser: impl Fn(String)) -> io::Result<()> {
     println!("Aufgabe {aufgabe}:");
     for (name, teilaufgabe) in get_aufgaben(aufgabe)?.into_iter() {
-        println!(r#""{name}":"#);
+        println!("{name:?}:"); // Debug für Anführungszeichen ohne raw literals
         let start = Instant::now();
         loeser(teilaufgabe);
         println!("Duration: {}ms", start.elapsed().as_millis());
