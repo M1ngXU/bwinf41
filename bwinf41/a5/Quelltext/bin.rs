@@ -4,6 +4,7 @@ use std::{
     str::FromStr,
 };
 
+use aufgaben_helfer::loese_aufgabe;
 use bit_vec::BitVec;
 use itertools::Itertools;
 
@@ -86,7 +87,7 @@ impl Huepfburg {
 
     fn keine_loesung(self) {
         println!(
-            "Keine Loesung! (Anzahl der Spruenge bis zu einer bekannten Situation: {})",
+            "Keine Lösung! (Anzahl der Sprünge bis zu einer bekannten Situation: {})",
             self.spruenge
         );
     }
@@ -213,10 +214,14 @@ pub(crate) fn a5(graph: String) {
     let treffpunkte = huepfburg.treffpunkte();
     for (end_feld, weg_sasha, weg_mika) in huepfburg.get_sprungfolgen(&treffpunkte) {
         println!(
-            "So kommen Sasha & Mika zum Knoten {end_feld} in {} Spruenge:",
+            "So kommen Sasha & Mika zum Knoten {end_feld} in {} Sprünge:",
             huepfburg.spruenge
         );
         println!("Sasha:\n{weg_sasha}");
         println!("Mika:\n{weg_mika}");
     }
+}
+
+fn main() {
+    loese_aufgabe(a5);
 }
