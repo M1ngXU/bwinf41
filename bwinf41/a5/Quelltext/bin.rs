@@ -102,11 +102,15 @@ impl Huepfburg {
             .any()
     }
     fn get_neue_erreichbare_knoten(&self, momentane_knoten: &BitVec) -> BitVec {
+        // keine_knoten gibt ein BitVec mit der Länge a mit a = Anzahl_Knoten zurück,
+        // bei dem jedes Element "false" ist
         let mut neue_erreichbare_knoten = self.keine_knoten();
         momentane_knoten
             .iter()
             .enumerate()
+            // nur erreichbare Knoten werden angeschaut
             .filter(|(_knoten, erreichbar)| *erreichbar)
+            // BitOr von allen Nachfolgerknoten der erreichbaren Knoten
             .for_each(|(knoten, _erreichbar)| {
                 neue_erreichbare_knoten.or(&self.nachfolger_knoten[knoten]);
             });
@@ -126,36 +130,44 @@ impl Huepfburg {
         ))
     }
     fn naechster_sprung(&mut self) {
+        // get_neue_erreichbare_knoten berechnet f(n + 1) durch f(n)
         self.sasha_erreichbare_knoten_folge
             .push_front(self.get_neue_erreichbare_knoten(self.sasha_erreichbare_knoten()));
         self.mika_erreichbare_knoten_folge
             .push_front(self.get_neue_erreichbare_knoten(self.mika_erreichbare_knoten()));
         self.spruenge += 1;
     }
-    fn treffpunkte(&self) -> Vec<usize> {
+    fn ueberschneidungen(&self) -> Vec<usize> {
         self.sasha_erreichbare_knoten()
             .bit_and(self.mika_erreichbare_knoten())
             .iter()
+            // Indeces bestimmen
             .positions(|b| b)
             .collect_vec()
     }
     fn get_sprungfolgen(&self, treffpunkte: &[usize]) -> Vec<(usize, String, String)> {
+        // get_sprungfolge bestimmt die Sprungfolge für Sasha/Mika ohne 0-index
         let sasha = self.get_sprungfolge(&self.sasha_erreichbare_knoten_folge, treffpunkte);
         let mika = self.get_sprungfolge(&self.mika_erreichbare_knoten_folge, treffpunkte);
         treffpunkte
             .iter()
+            // +1, da die Knoten intern 0-indexed sind
             .map(|treffpunkt| treffpunkt + 1)
+            // für jeden Treffpunkt werden die entsprechenden Sprungfolgen als String formattiert
             .map(|treffpunkt| {
                 [&sasha, &mika]
                     .iter()
                     .map(|kind| {
                         kind.iter()
+                            // die Sprungfolge finden für das Kind finden, die beim Treffpunkt endet
                             .find(|s| s[self.spruenge] == treffpunkt)
                             .unwrap()
                             .iter()
+                            // mit einem "->" verbinden
                             .join(" -> ")
                     })
                     .collect_tuple()
+                    // Rückgabe in Form von (Treffpunkt_Knoten, Sasha_Sprungfolge, Mika_Sprungfolge)
                     .map(|(sasha, mika)| (treffpunkt.to_owned(), sasha, mika))
                     .unwrap()
             })
@@ -180,6 +192,7 @@ impl Huepfburg {
         erreichbare_knoten_folge: &LinkedList<BitVec>,
         treffpunkte: &[usize],
     ) -> Vec<Vec<usize>> {
+        // für jeden Treffpunkt eine Sprungfolge für Sasha/Mika bestimmen
         treffpunkte
             .iter()
             .map(|erreichbarer_knoten| {
@@ -200,19 +213,24 @@ impl Huepfburg {
     }
 }
 
-pub(crate) fn a5(graph: String) {
+pub fn a5(graph: String) {
     let mut huepfburg: Huepfburg = graph.parse().unwrap();
 
+    // solange es keine Überschneidung gibt und es eine neue Konstellation gibt,
+    // wird f(n + 1) berechnet
     while !huepfburg.gleicher_erreichbarer_knoten() {
+        // true wenn diese Konstellation schon bekannt ist
         if huepfburg.versuche_merken() {
+            // gibt den Text für keine Lösung aus
             huepfburg.keine_loesung();
             return;
         }
         huepfburg.naechster_sprung();
     }
 
-    let treffpunkte = huepfburg.treffpunkte();
-    for (end_feld, weg_sasha, weg_mika) in huepfburg.get_sprungfolgen(&treffpunkte) {
+    // die Indeces der Überschneidungen
+    let ueberschneidungen = huepfburg.ueberschneidungen();
+    for (end_feld, weg_sasha, weg_mika) in huepfburg.get_sprungfolgen(&ueberschneidungen) {
         println!(
             "So kommen Sasha & Mika zum Knoten {end_feld} in {} Sprünge:",
             huepfburg.spruenge
