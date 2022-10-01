@@ -36,16 +36,14 @@ impl From<&str> for Sudoku {
     }
 }
 impl Sudoku {
-    fn parse(s: &str) -> (Self, Self, Self) {
+    fn parse(s: &str) -> (Self, Self) {
         let formattierte_datei = s.replace('\r', "");
         let (original, neu) = formattierte_datei // kein CRLF Problem
             .split("\n\n")
             .map(Self::from)
             .collect_tuple()
             .unwrap();
-        let mut neu_rotiert = neu; // neu wird kopiert
-        neu_rotiert.rotiere_l();
-        (original, neu, neu_rotiert)
+        (original, neu)
     }
 
     fn kopieren_und_umformen(&self, [z_b, z_1, z_2, z_3, s_b, s_1, s_2, s_3]: Umformungen) -> Self {
@@ -97,17 +95,32 @@ impl Sudoku {
         h
     }
     fn aehnlich(&self, other: &Self) -> Option<[u8; 9]> {
+        // die Felder der beiden Sudokus werden in einem Iterator über 81 Elementen transformiert,
+        // bei dem jedes Element angibt, ob dieses Feld eine Ziffer enthält oder nicht (keine 0 == true)
         let [s, o] = [self, other].map(|s| s.feld.iter().flatten().map(Option::is_some));
+        // sind beide Iteratoren identisch (=an den selben Stellen gibt es Ziffern/keine Ziffern)
+        // so wird überprüft, ob es möglich ist, durch eine Umbenennung beide Sudokus "gleich zu setzen"
+        // itertools hat viele nützliche Funktionen auf Iteratoren
         if itertools::equal(s, o) {
+            // für beide Sudokus wird eine HashMap erstellt, die die Ziffer als Schlüssel besitzt
+            // und als Wert die Positionen (0-indexed) in einem HashSet hat
             let [s, o] = [self, other].map(Self::positionen_nach_zahl);
+            // sind beide HashMaps gleich lang (also beide haben dieselbe Anzahl an verschiedenen Ziffern),
+            // so werden deren HashSets auf Gleichheit überprüft und die Umbenennung gespeichert
             if s.len() == o.len() {
                 let mut umbenennung = [0; 9];
                 s.into_iter()
+                    // hier wird für jede Ziffer x im 1. Sudoku eine Ziffer y im 2. Sudoku gesucht,
+                    // deren Positionen identisch sind
                     .map(|(n, e)| o.iter().find(|(_, f)| &&e == f).map(|(m, _)| (n, *m)))
                     .try_for_each(|o| {
+                        // gibt es eine solche Ziffer x und y, so ist o = Some(x, y). x und y werden in umbenennung gespeichert.
+                        // Ist dies nicht der Fall, so ist o = None und "try_for_each" gibt None zurück
                         umbenennung[o?.0 as usize - 1] = o?.1;
                         Some(())
                     })
+                    // ist das Ergebnis von "try_for_each" nicht None (also es gibt eine Umbenennung),
+                    // so wird die Umbenennung zurückgegeben (also statt Some(()) => Some(umbenennung))
                     .map(|_| umbenennung)
             } else {
                 None
@@ -117,7 +130,7 @@ impl Sudoku {
         }
     }
 
-    fn rotiere_l(&mut self) {
+    fn rotiere(&mut self) {
         // = transpose + horizontal spiegeln
         let feld = self.feld; // wird kopiert
         for (y, zeile) in self.feld.iter_mut().enumerate() {
@@ -241,14 +254,23 @@ fn get_moeglichkeiten() -> impl ParallelIterator<Item = Umformungen> {
 }
 
 pub fn a3(sudokus: String) {
-    let (original, neu, neu_rotiert) = Sudoku::parse(&sudokus);
+    let (original, neu) = Sudoku::parse(&sudokus);
+    let mut neu_rotiert = neu; // neu wird kopiert
+    neu_rotiert.rotiere();
     println!(
         "{}",
+        // alle Kombinationen von Möglichkeiten, die Zeilen-/Spalten-(Blöcke) zu permutieren, 6 ^ 8
+        // dies ist ein paralleler Iterator von `rayon`, welche die Parallelisierung übernimmt
         get_moeglichkeiten()
+            // suche nach der ersten Permutation, durch die das alte Sudoku "das neue wird"
             .find_map_any(|umformungen| {
+                // das alte Sudoku wird kopiert und danach umgeformt
                 let neue_moeglichkeit = original.kopieren_und_umformen(umformungen);
+                // ist das neu-erzeugte Sudoku einem der neuen Sudoku "ähnlich"
+                // (=alles identisch ausser eine Umbenennung der Ziffern)
                 let passend = neue_moeglichkeit.aehnlich(&neu);
                 let nach_rotation_passend = neue_moeglichkeit.aehnlich(&neu_rotiert);
+                // ist eines der beiden "ähnlich", so wird das Ergebnis formattiert und zurückgegeben
                 passend.or(nach_rotation_passend).map(|umbenennung| {
                     formattiere_ergebnis(nach_rotation_passend.is_some(), umformungen, umbenennung)
                 })
