@@ -57,7 +57,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "bwinf41"
+name = "bwinf41-1"
 version = "0.1.0"
 dependencies = [
  "bit-vec",
@@ -68,7 +68,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "bwinf41_zipper"
+name = "bwinf41-2"
+version = "0.1.0"
+dependencies = [
+ "glob",
+ "itertools",
+ "rayon",
+ "tinyvec",
+]
+
+[[package]]
+name = "bwinf41-zipper"
 version = "0.1.0"
 dependencies = [
  "zip 0.6.2",
@@ -538,6 +548,12 @@ name = "time-macros"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42657b1a6f4d817cda8e7a0ace261fe0cc946cf3a80314390b22cc61ae080792"
+
+[[package]]
+name = "tinyvec"
+version = "1.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "87cc5ceb3875bb20c2890005a4e226a4651264a5c75edb2421b52861a0a0cb50"
 
 [[package]]
 name = "typenum"

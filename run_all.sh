@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -e
 
 SOURCE=${BASH_SOURCE[0]}
 while [ -L "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symlink
@@ -8,8 +9,8 @@ while [ -L "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symli
 done
 DIR=$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )
 
-cd $DIR
+cd "$DIR"
 
-for a in bwinf41/*/ ; do
-    cargo run --package bwinf41 --bin $(basename $a) --release -- "$a/Quelltext/aufgaben/*"
+for a in bwinf41-1/*/ ; do
+    cargo run --package bwinf41 --bin "$(basename "$a")" --release -- "$a/Quelltext/aufgaben/*"
 done

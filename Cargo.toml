@@ -1,11 +1,11 @@
 [package]
-name = "bwinf41_zipper"
+name = "bwinf41-zipper"
 version = "0.1.0"
 edition = "2021"
-#default-run = "bwinf41_zipper"
+default-run = "bwinf41-zipper"
 
 [workspace]
-members = ["bwinf41"]
+members = ["bwinf41-1", "bwinf41-2"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

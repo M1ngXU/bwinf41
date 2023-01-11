@@ -1,0 +1,22 @@
+[package]
+name = "bwinf41-2"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tinyvec = "1.6.0"
+itertools = "0.10.3"
+rayon = "1.5.3"
+glob = "0.3.0"
+
+[lib]
+name = "aufgaben_helfer"
+path = "./aufgaben_helfer.rs"
+
+# [[bin]]
+# name = "a1"
+# path = "./a1/Quelltext/bin.rs"
+
+[[bin]]
+name = "a3"
+path = "./a3/Quelltext/bin.rs"
