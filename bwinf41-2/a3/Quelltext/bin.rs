@@ -1,14 +1,13 @@
 use aufgaben_helfer::loese_aufgabe;
-use itertools::Itertools;
 use tinyvec::ArrayVec;
 
 use std::{collections::HashMap, fmt::Debug};
 
-const MAX_STAPEL_SIZE: usize = 16;
+const MAX_STAPEL_GROESSE: usize = 16;
 
 #[derive(PartialEq, Eq, Clone, Debug, Hash, Default, Copy)]
 struct Stapel {
-    stapel: ArrayVec<[u8; MAX_STAPEL_SIZE]>,
+    stapel: ArrayVec<[u8; MAX_STAPEL_GROESSE]>,
 }
 impl From<&str> for Stapel {
     fn from(s: &str) -> Self {
@@ -75,55 +74,46 @@ impl Stapel {
         }
     }
 }
-#[derive(PartialEq, Eq, Clone, Debug, Hash, Default, Copy)]
-struct Status {
-    stapel: ArrayVec<[Stapel; MAX_STAPEL_SIZE]>,
-}
 
 fn stapel_durchprobieren(
-    gesehen: &mut HashMap<Stapel, ArrayVec<[u8; MAX_STAPEL_SIZE]>>,
+    gesehen: &mut HashMap<Stapel, ArrayVec<[u8; MAX_STAPEL_GROESSE]>>,
     stapel: Stapel,
-) -> ArrayVec<[u8; MAX_STAPEL_SIZE]> {
+) -> ArrayVec<[u8; MAX_STAPEL_GROESSE]> {
     if let Some(status) = gesehen.get(&stapel) {
         *status
     } else {
-        let best = if stapel.is_sorted() {
+        let beste_operationen = if stapel.is_sorted() {
             ArrayVec::new()
         } else {
-            let mut best: Option<ArrayVec<[u8; MAX_STAPEL_SIZE]>> = None;
+            let mut beste_operationen: Option<ArrayVec<[u8; MAX_STAPEL_GROESSE]>> = None;
             // test all states & pick the best one
             for i in 0..stapel.stapel.len() {
-                let neuer_stapel = stapel.wenden_und_essen(i, false);
-                let neuer_status = stapel_durchprobieren(gesehen, neuer_stapel);
-                if best
+                let neuer_stapel = stapel.wenden_und_essen(i, true);
+                let mut neuer_status = stapel_durchprobieren(gesehen, neuer_stapel);
+                if beste_operationen
                     .map(|b| b.len())
                     .filter(|l| *l <= neuer_status.len() + 1)
                     .is_none()
                 {
-                    best = Some(neuer_status);
-                    best.as_mut().unwrap().push(i as u8);
-                    println!();
-                    neuer_stapel.print(7);
-                    println!();
-                    println!("{best:?}");
-                    println!();
+                    neuer_status.push(i as u8);
+                    beste_operationen = Some(neuer_status);
                 }
             }
-            best.unwrap()
+            beste_operationen.unwrap()
         };
-        gesehen.insert(stapel, best);
-        best
+        gesehen.insert(stapel, beste_operationen);
+        beste_operationen
     }
 }
 
-fn print(mut stapel: Stapel, wende_und_ess_operationen: &ArrayVec<[u8; MAX_STAPEL_SIZE]>) {
+fn print(mut stapel: Stapel, wende_und_ess_operationen: &ArrayVec<[u8; MAX_STAPEL_GROESSE]>) {
     println!("A(s) = {}", wende_und_ess_operationen.len());
     println!("Anfangsstapel:");
     let anfangs_groesse = stapel.stapel.len();
     stapel.print(anfangs_groesse);
     println!();
 
-    for wende_und_ess_operation in wende_und_ess_operationen {
+    for wende_und_ess_operation in wende_und_ess_operationen.into_iter().rev() {
         println!("Ess-und-Wende-Operation bei: {wende_und_ess_operation}");
         println!();
         stapel = stapel.wenden_und_essen(*wende_und_ess_operation as _, false);

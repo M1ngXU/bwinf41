@@ -13,9 +13,9 @@ glob = "0.3.0"
 name = "aufgaben_helfer"
 path = "./aufgaben_helfer.rs"
 
-# [[bin]]
-# name = "a1"
-# path = "./a1/Quelltext/bin.rs"
+[[bin]]
+name = "a1"
+path = "./a1/Quelltext/bin.rs"
 
 [[bin]]
 name = "a3"
