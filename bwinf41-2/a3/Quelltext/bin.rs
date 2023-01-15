@@ -1,18 +1,15 @@
 use itertools::Itertools;
 use tinyvec::ArrayVec;
 
-use std::{
-    collections::HashMap,
-    fmt::Debug,
-    sync::{Arc},
-    time::Instant,
-};
+use std::{collections::HashMap, fmt::Debug, sync::Arc, time::Instant};
 
 const MAX_STAPEL_GROESSE: usize = 16;
 
-#[derive(PartialEq, Eq, Clone, Debug, Hash, Default, Copy)]
+type Array = ArrayVec<[u8; MAX_STAPEL_GROESSE]>;
+
+#[derive(PartialEq, Eq, Clone, Debug, Hash, Default)]
 struct Stapel {
-    stapel: ArrayVec<[u8; MAX_STAPEL_GROESSE]>,
+    stapel: Array,
 }
 impl From<&str> for Stapel {
     fn from(s: &str) -> Self {
@@ -26,7 +23,7 @@ impl From<&str> for Stapel {
             .expect("Gesamtgröße ist keine Zahl");
         let mut stapel = zeilen
             .map(|groesse| groesse.parse().expect("Größe ist keine Zahl"))
-            .collect::<ArrayVec<_>>();
+            .collect::<Array>();
         stapel.reverse();
         assert_eq!(groesse, stapel.len());
         Self { stapel }
@@ -36,7 +33,7 @@ impl Stapel {
     // TODO inefficient
     fn wenden_und_essen(&self, index: u8, normalisieren: bool) -> Self {
         assert!(self.stapel.len() > index as usize);
-        let mut neuer_stapel = ArrayVec::new();
+        let mut neuer_stapel = Array::new();
         let gegessen = self.stapel[index as usize];
         for i in 0..index {
             let mut tmp = self.stapel[i as usize];
@@ -59,11 +56,11 @@ impl Stapel {
 
     fn is_sorted(&self) -> bool {
         let mut letztes = u8::MAX;
-        for pancake in self.stapel {
-            if pancake > letztes {
+        for pancake in &self.stapel {
+            if pancake > &letztes {
                 return false;
             }
-            letztes = pancake;
+            letztes = *pancake;
         }
         true
     }
@@ -80,16 +77,16 @@ impl Stapel {
 }
 
 // fn stapel_durchprobieren(
-//     gesehen: &mut HashMap<Stapel, ArrayVec<[u8; MAX_STAPEL_GROESSE]>>,
+//     gesehen: &mut HashMap<Stapel, Array,
 //     stapel: Stapel,
-// ) -> ArrayVec<[u8; MAX_STAPEL_GROESSE]> {
+// ) -> Array {
 //     if let Some(status) = gesehen.get(&stapel) {
 //         *status
 //     } else {
 //         let beste_operationen = if stapel.is_sorted() {
-//             ArrayVec::new()
+//             Array::new()
 //         } else {
-//             let mut beste_operationen: Option<ArrayVec<[u8; MAX_STAPEL_GROESSE]>> = None;
+//             let mut beste_operationen: Option<Array> = None;
 //             // test all states & pick the best one
 //             for i in 0..stapel.stapel.len() {
 //                 let neuer_stapel = stapel.wenden_und_essen(i, true);
@@ -132,38 +129,32 @@ impl From<Flip> for Option<u8> {
     }
 }
 
-fn stapel_durchprobieren2(
-    gesehen: &HashMap<Stapel, (usize, Flip)>,
-    stapel: Stapel,
-) -> (usize, Flip) {
+fn stapel_durchprobieren2(gesehen: &HashMap<Stapel, (u8, Flip)>, stapel: &Stapel) -> (u8, Flip) {
     if let Some(status) = gesehen.get(&stapel) {
         *status
+    } else if stapel.is_sorted() {
+        (0, None.into())
     } else {
-        let beste_operationen = if stapel.is_sorted() {
-            (0, None.into())
-        } else {
-            let mut beste_operationen: Option<(usize, Flip)> = None;
-            // test all states & pick the best one
-            for i in 0..stapel.stapel.len() as u8 {
-                let neuer_stapel = stapel.wenden_und_essen(i, true);
-                let (anzahl, _) = stapel_durchprobieren2(gesehen, neuer_stapel);
-                if beste_operationen.filter(|(l, _)| l <= &anzahl).is_none() {
-                    beste_operationen = Some((anzahl + 1, Some(i).into()));
-                }
+        let mut beste_operationen: Option<(u8, Flip)> = None;
+        // test all states & pick the best one
+        for i in 0..stapel.stapel.len() as u8 {
+            let neuer_stapel = stapel.wenden_und_essen(i, true);
+            let (anzahl, _) = stapel_durchprobieren2(gesehen, &neuer_stapel);
+            if beste_operationen.filter(|(l, _)| l <= &anzahl).is_none() {
+                beste_operationen = Some((anzahl + 1, Some(i).into()));
             }
-            beste_operationen.unwrap()
-        };
-        beste_operationen
+        }
+        beste_operationen.unwrap()
     }
 }
 
-fn print(mut stapel: Stapel, gesehen: &HashMap<Stapel, (usize, Flip)>) {
+fn print(mut stapel: Stapel, gesehen: &HashMap<Stapel, (u8, Flip)>) {
     println!("Anfangsstapel:");
     let anfangs_groesse = stapel.stapel.len();
     stapel.print(anfangs_groesse);
     println!();
 
-    let mut stapel_to_print = stapel;
+    let mut stapel_to_print = stapel.clone();
 
     while let Some(wende_und_ess_operation) = gesehen.get(&stapel).and_then(|(_, f)| f.as_option())
     {
@@ -187,7 +178,7 @@ fn print(mut stapel: Stapel, gesehen: &HashMap<Stapel, (usize, Flip)>) {
 
 // copied from unstable u64::div_ceil
 #[inline]
-pub const fn div_ceil(a: u64, b: u64) -> u64 {
+pub const fn div_ceil(a: usize, b: usize) -> usize {
     let d = a / b;
     let r = a % b;
     if r > 0 && b > 0 {
@@ -218,37 +209,82 @@ macro_rules! exec_time {
     };
 }
 
+fn enumerate_permutation(mut x: Array, indeces: &mut Array) -> usize {
+    let mut result = 0;
+    indeces.truncate(0);
+    for i in 0..x.len() {
+        let index = x.iter().position(|n| *n == i as u8).unwrap() as usize;
+        indeces.push(index as u8);
+        x.remove(index);
+    }
+    let mut fact = 1;
+    for (i, index) in indeces.iter().rev().enumerate() {
+        if i > 1 {
+            fact *= i;
+        }
+        result += *index as usize * fact;
+    }
+    result
+}
+
+#[inline]
+fn permutation_by_enumeration(mut i: usize, n: usize, indeces: &mut Array) -> Array {
+    let mut fact = (1..=n).product::<usize>();
+    indeces.truncate(0);
+    let mut result = Array::from_iter([0; 5]);
+    for j in 0..n {
+        fact /= n - j;
+        indeces.push((i / fact) as u8);
+        i %= fact;
+    }
+    for n in (0..n).rev() {
+        result.insert(indeces[n] as usize, n as u8);
+    }
+    result
+}
+
 pub fn a3_b(limit: u8) {
     let start = Instant::now();
 
-    let mut gesehen = HashMap::new();
+    let mut gesehen = HashMap::with_capacity(
+        (0..limit as u64)
+            .map(|i| (1..=i).product::<u64>())
+            .sum::<u64>() as usize,
+    );
     let mut worst_cases = Vec::new();
     for i in 1..=limit {
-        let mut worst_case: Option<(Stapel, usize, Flip)> = None;
-        let factorial = (1..=i as u64).product1().unwrap_or(1_u64);
+        let mut worst_case: Option<(Stapel, u8, Flip)> = None;
+        let factorial = (1..=i as usize).product1().unwrap_or(1_usize);
         let thread_count = std::thread::available_parallelism().unwrap().get();
-        let chunk_size = div_ceil(factorial, thread_count as u64) as usize;
+        let chunk_size = div_ceil(factorial, thread_count);
         let permutations = (1..=i)
             .permutations(i as usize)
             .chunks(chunk_size)
             .into_iter()
             .map(|c| c.collect_vec())
             .collect_vec();
-        let mut gesehen_neu = HashMap::new();
+        let mut gesehen_neu = HashMap::with_capacity(factorial);
         let gesehen_arc = Arc::new(gesehen);
         for handle in permutations.into_iter().map(|chunk| {
             let gesehen_clone = gesehen_arc.clone();
             std::thread::spawn(move || {
+                // let chunk_start = chunk * chunk_size;
+                // let chunk_end = ((chunk + 1) * chunk_size).min(factorial);
                 let gesehen = gesehen_clone;
-                let mut worst_case: Option<(Stapel, usize, Flip)> = None;
-                let mut gesehen_neu = HashMap::new();
+                let mut worst_case: Option<(Stapel, u8, Flip)> = None;
+                let mut gesehen_neu = HashMap::with_capacity(chunk_size);
+                // let mut tmp = Array::new();
                 for s in chunk {
                     let stapel = Stapel {
-                        stapel: ArrayVec::from_iter(s),
+                        stapel: s.into_iter().collect(), //permutation_by_enumeration(s, i as usize, &mut tmp),
                     };
-                    let (laenge, index) = stapel_durchprobieren2(&gesehen, stapel);
-                    gesehen_neu.insert(stapel, (laenge, index));
-                    if worst_case.filter(|(_, l, _)| l >= &laenge).is_none() {
+                    let (laenge, index) = stapel_durchprobieren2(&gesehen, &stapel);
+                    gesehen_neu.insert(stapel.clone(), (laenge, index));
+                    if worst_case
+                        .as_ref()
+                        .filter(|(_, l, _)| l >= &laenge)
+                        .is_none()
+                    {
                         worst_case = Some((stapel, laenge, index));
                     }
                 }
@@ -258,21 +294,25 @@ pub fn a3_b(limit: u8) {
             let (wc, gesehen_n) = handle.join().unwrap();
             gesehen_neu.extend(gesehen_n);
             if let Some((stapel, laenge, index)) = wc {
-                if worst_case.filter(|(_, l, _)| l >= &laenge).is_none() {
+                if worst_case
+                    .as_ref()
+                    .filter(|(_, l, _)| l >= &laenge)
+                    .is_none()
+                {
                     worst_case = Some((stapel, laenge, index));
                 }
             }
         }
-        worst_cases.push(worst_case);
+        worst_cases.push(worst_case.clone());
         gesehen = Arc::try_unwrap(gesehen_arc).unwrap();
         gesehen.extend(gesehen_neu);
 
-        if let Some((stapel, laenge, index)) = worst_case {
+        if let Some((stapel, laenge, _)) = worst_case {
             println!("P({i}) = {laenge}");
-            println!();
-            println!("Beispiel:");
-            print(stapel, &gesehen);
-            println!();
+            // println!();
+            // println!("Beispiel:");
+            // print(stapel, &gesehen);
+            // println!();
         }
     }
 
@@ -291,6 +331,9 @@ pub fn a3_b(limit: u8) {
 }
 
 fn main() {
+    // println!("{:?}", enumerate_permutation(vec![2, 0, 4, 1, 3]));
+    // println!("{:?}", permutation_by_enumeration(37, 5));
+    // panic!();
     match std::env::args().nth(1).and_then(|n| n.parse::<u8>().ok()) {
         Some(limit) if std::env::args().count() == 2 => a3_b(limit),
         _ => todo!(), //loese_aufgabe(a3_a),
@@ -299,16 +342,14 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use tinyvec::ArrayVec;
-
-    use crate::Stapel;
+    use crate::{Array, Stapel};
 
     #[test]
     fn parse() {
         let cut = "4\n1\n3\n4\n2\n".into();
         assert_eq!(
             Stapel {
-                stapel: ArrayVec::from_iter([1, 3, 4, 2]),
+                stapel: Array::from_iter([1, 3, 4, 2]),
             },
             cut
         );
