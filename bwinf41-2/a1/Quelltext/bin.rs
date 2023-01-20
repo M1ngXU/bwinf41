@@ -1,6 +1,6 @@
 use bit_vec::BitVec;
 use image::{ImageBuffer, Rgb};
-use rayon::prelude::{IntoParallelIterator, ParallelIterator};
+use rayon::prelude::{IntoParallelIterator, ParallelBridge, ParallelIterator};
 use show_image::create_window;
 use std::{
     collections::{BinaryHeap, HashMap, HashSet},
@@ -8,13 +8,15 @@ use std::{
     hash::Hash,
     io::Write,
     ops::Deref,
+    sync::Arc,
+    time::Instant,
 };
 
 use aufgaben_helfer::loese_aufgabe;
 use imageproc::drawing::{draw_hollow_circle_mut, draw_line_segment_mut};
 use itertools::Itertools;
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 struct Ort {
     x: i64,
     y: i64,
@@ -84,32 +86,14 @@ impl Ord for Wrapper {
     }
 }
 
-#[derive(Clone, Copy, Hash, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Hash, Debug, PartialEq, Eq, Default)]
 struct Kante {
     von: Ort,
     zu: Ort,
 }
 
-pub fn a1(eingabe: String) {
-    let orte = eingabe
-        .trim_start_matches('\u{feff}') // manchmal gibt es ein BOM am Anfang eines Strings
-        .split_ascii_whitespace()
-        .map(|n| n.replacen('.', "", 1).parse::<i64>().expect("Keine Zahl!"))
-        .tuples()
-        .enumerate()
-        .map(|(i, (x, y))| Ort { x, y, i })
-        .collect_vec();
-    let kanten = orte
-        .iter()
-        .copied()
-        .cartesian_product(orte.clone())
-        .cartesian_product(orte.clone())
-        .map(|((a, b), c)| (a, b, c))
-        .filter(|(a, b, c)| a != b && a != c && b != c)
-        .filter(|(a, b, c)| b.moegliche_abbiegung(a, c))
-        .map(|(a, b, c)| (Kante { von: a, zu: b }, Kante { von: b, zu: c }))
-        .into_group_map();
-    let bester_pfad = kanten
+fn best_pfad(orte: Vec<Ort>, kanten: HashMap<Kante, Vec<Kante>>) -> Wrapper {
+    kanten
         .clone()
         .into_par_iter()
         .find_map_any(|(start, nachfolger)| {
@@ -163,7 +147,10 @@ pub fn a1(eingabe: String) {
             None
         })
         //.max_by_key(|n| n.1)
-        .unwrap();
+        .unwrap()
+}
+
+fn display(orte: Vec<Ort>, bester_pfad: Wrapper) {
     let scale = 500_000;
     let min_x = orte.iter().map(|o| o.x).min().unwrap_or_default() / scale;
     let min_y = orte.iter().map(|o| o.y).min().unwrap_or_default() / scale;
@@ -223,6 +210,107 @@ pub fn a1(eingabe: String) {
     let window = create_window("image", Default::default()).unwrap();
     window.set_image("image", img).unwrap();
     window.wait_until_destroyed().unwrap();
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Hash)]
+struct KantenIndex {
+    von: u64,
+    zu: u64,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, Default, Hash)]
+struct Pfad {
+    anfang: KantenIndex,
+    ende: KantenIndex,
+    anfang_mitte: Option<Arc<Pfad>>,
+    ende_mitte: Option<Arc<Pfad>>,
+    besucht: u64,
+}
+
+pub fn a1(eingabe: String) {
+    let orte = eingabe
+        .trim_start_matches('\u{feff}') // manchmal gibt es ein BOM am Anfang eines Strings
+        .split_ascii_whitespace()
+        .map(|n| n.replacen('.', "", 1).parse::<i64>().expect("Keine Zahl!"))
+        .tuples()
+        .enumerate()
+        .map(|(i, (x, y))| Ort { x, y, i })
+        .collect_vec();
+    let kanten = orte
+        .iter()
+        .copied()
+        .cartesian_product(orte.clone())
+        .cartesian_product(orte.clone())
+        .map(|((a, b), c)| (a, b, c))
+        .filter(|(a, b, c)| a != b && a != c && b != c)
+        .filter(|(a, b, c)| b.moegliche_abbiegung(a, c))
+        .map(|(a, b, c)| {
+            (
+                KantenIndex {
+                    von: 1 << a.i as u64,
+                    zu: 1 << b.i as u64,
+                },
+                1 << c.i as u64,
+            )
+        })
+        .into_grouping_map()
+        .fold(0, |acc, _, cur| acc | cur);
+    let mut elapsed = Instant::now();
+    let mut kombinationen = kanten
+        .iter()
+        .flat_map(|(von, zu)| {
+            (0..u64::BITS)
+                .filter(|n| ((1 << n) & *zu) != 0)
+                .map(|n| KantenIndex {
+                    von: von.zu,
+                    zu: 1 << n,
+                })
+                .map(|zu| (*von, zu))
+        })
+        .map(|(von, zu)| Pfad {
+            anfang: von,
+            ende: zu,
+            anfang_mitte: None,
+            ende_mitte: None,
+            besucht: von.von & von.zu & zu.zu,
+        })
+        .collect::<Vec<_>>();
+    println!("{}, after {:?}", kombinationen.len(), elapsed.elapsed());
+    std::io::Write::flush(&mut std::io::stdout()).unwrap();
+    elapsed = Instant::now();
+    kombinationen = kombinationen
+        .into_iter()
+        .tuple_combinations()
+        .flat_map(|(p1, p2)| [(p1.clone(), p2.clone()), (p2, p1)])
+        .filter(|(p1, p2)| (p1.besucht & p2.besucht) == 0)
+        .filter(|(p1, p2)| (kanten.get(&p1.ende).unwrap_or(&0) & p2.anfang.von) != 0)
+        .map(|(p1, p2)| {
+            Pfad {
+                anfang: p1.anfang,
+                ende: p2.ende,
+                besucht: p1.besucht | p2.besucht,
+                anfang_mitte: None, //Some(p1.clone()),
+                ende_mitte: None,   //Some(p2.clone()),
+            }
+        })
+        .collect();
+    println!("{}, after {:?}", kombinationen.len(), elapsed.elapsed());
+    std::io::Write::flush(&mut std::io::stdout()).unwrap();
+    elapsed = Instant::now();
+    println!(
+        "{}",
+        kombinationen
+            .into_iter()
+            .tuple_combinations()
+            .par_bridge()
+            .into_par_iter()
+            .flat_map(|(p1, p2)| [(p1.clone(), p2.clone()), (p2, p1)])
+            .filter(|(p1, p2)| (p1.besucht & p2.besucht) == 0)
+            .filter(|(p1, p2)| (kanten.get(&p1.ende).unwrap_or(&0) & p2.anfang.von) != 0)
+            .count()
+    );
+    // let bester_pfad = best_pfad(orte.clone(), kanten.clone());
+    // display(orte, bester_pfad);
 }
 
 #[show_image::main]

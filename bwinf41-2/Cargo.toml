@@ -12,6 +12,7 @@ image = "0.24.5"
 imageproc = "0.23.0"
 bit-vec = "0.6.3"
 show-image = {version = "0.13.1", features = ["image", "save"]}
+cudarc = "0.6.1"
 
 [lib]
 name = "aufgaben_helfer"
@@ -24,3 +25,6 @@ path = "./a1/Quelltext/bin.rs"
 [[bin]]
 name = "a3"
 path = "./a3/Quelltext/bin.rs"
+
+# [profile.dev]
+# opt-level = 3

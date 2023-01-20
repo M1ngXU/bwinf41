@@ -1,3 +1,4 @@
+use cudarc::{prelude::{CudaDeviceBuilder, LaunchAsync, LaunchConfig, ValidAsZeroBits}, nvrtc::Ptx};
 use itertools::Itertools;
 use tinyvec::ArrayVec;
 
@@ -231,19 +232,19 @@ fn enumerate_permutation(mut x: Array, indeces: &mut Array) -> usize {
 fn permutation_by_enumeration(mut i: usize, n: usize, indeces: &mut Array) -> Array {
     let mut fact = (1..=n).product::<usize>();
     indeces.truncate(0);
-    let mut result = Array::from_iter([0; 5]);
+    let mut result = Array::new();
     for j in 0..n {
         fact /= n - j;
         indeces.push((i / fact) as u8);
         i %= fact;
     }
     for n in (0..n).rev() {
-        result.insert(indeces[n] as usize, n as u8);
+        result.insert(indeces[n] as usize, n as u8 + 1);
     }
     result
 }
 
-pub fn a3_b(limit: u8) {
+pub fn a3_b1(limit: u8) {
     let start = Instant::now();
 
     let mut gesehen = HashMap::with_capacity(
@@ -330,12 +331,75 @@ pub fn a3_b(limit: u8) {
     println!("Ausführungsdauer: {}ms", start.elapsed().as_millis());
 }
 
+const THREADS: u32 = 256;
+const BLOCKS: u32 = 64;
+
+#[repr(C)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Default)]
+struct Bestes(u64, u8, u8);
+unsafe impl ValidAsZeroBits for Bestes {}
+
+fn a3_b2(limit: u8) {
+    let start = Instant::now();
+
+    let device = CudaDeviceBuilder::new(0)
+        .with_ptx(
+            Ptx::Image(include_bytes!("a/kernel.ptx").map(|b| b as i8).to_vec()),// r"bwinf41-2\a3\Quelltext\kernel.cu",
+            "cuda",
+            &["run_permutations"],
+        )
+        .build()
+        .unwrap();
+    let run_permutations = device.get_func("cuda", "run_permutations").unwrap();
+
+    let mut prior = device.alloc_zeros_async(1).unwrap();
+    device.copy_into_async(vec![Bestes(0, 1, -1i8 as u8)], &mut prior).unwrap();
+    let mut current;
+    let mut fact = 1;
+    let mut bestes_gefundene = device.alloc_zeros_async((THREADS * BLOCKS) as usize).unwrap();
+    let mut beste_box = Box::new([Bestes(0, 0, 0); (THREADS * BLOCKS) as usize]);
+    let bestes = beste_box.as_mut_slice();
+
+    for i in 2..=limit {
+        fact *= i as u64;
+        let threads = if fact < 200 { 1 } else { THREADS };
+        let blocks = if fact < 1000 { 1 } else { BLOCKS };
+        current = device.alloc_zeros_async(fact as usize).unwrap();
+        unsafe {
+            run_permutations.clone().launch_async(
+                LaunchConfig {
+                    block_dim: (threads, 1, 1),
+                    grid_dim: (blocks, 1, 1),
+                    shared_mem_bytes: 0,
+                },
+                (&prior, &mut current, &mut bestes_gefundene, i, fact),
+            )
+        }
+        .unwrap();
+
+        device.sync_copy_from(&bestes_gefundene, bestes).unwrap();
+        let Bestes(enumeration, laenge, flip) = bestes[..(threads * blocks) as usize].iter().max_by_key(|Bestes(_, laenge, _)| laenge).unwrap();
+
+        println!("A(s) = {laenge}");
+        println!("Last flip at {flip}");
+        println!("{enumeration}");
+        Stapel {stapel: permutation_by_enumeration(*enumeration as usize, i as usize, &mut Default::default())}.print(i as usize);
+        println!();
+        println!();
+
+        prior = current;
+    }
+
+    println!();
+    println!("Ausführungsdauer: {}ms", start.elapsed().as_millis());
+}
+
 fn main() {
     // println!("{:?}", enumerate_permutation(vec![2, 0, 4, 1, 3]));
     // println!("{:?}", permutation_by_enumeration(37, 5));
     // panic!();
     match std::env::args().nth(1).and_then(|n| n.parse::<u8>().ok()) {
-        Some(limit) if std::env::args().count() == 2 => a3_b(limit),
+        Some(limit) if std::env::args().count() == 2 => a3_b2(limit),
         _ => todo!(), //loese_aufgabe(a3_a),
     }
 }
