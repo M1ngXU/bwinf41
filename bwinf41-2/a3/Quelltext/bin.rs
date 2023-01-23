@@ -1,8 +1,11 @@
-use cudarc::{prelude::{CudaDeviceBuilder, LaunchAsync, LaunchConfig, ValidAsZeroBits}, nvrtc::Ptx};
+use cudarc::{
+    nvrtc::Ptx,
+    prelude::{CudaDeviceBuilder, CudaSlice, LaunchAsync, LaunchConfig, ValidAsZeroBits},
+};
 use itertools::Itertools;
 use tinyvec::ArrayVec;
 
-use std::{collections::HashMap, fmt::Debug, sync::Arc, time::Instant};
+use std::{collections::HashMap, fmt::{Debug, Display}, sync::Arc, time::Instant};
 
 const MAX_STAPEL_GROESSE: usize = 16;
 
@@ -108,8 +111,10 @@ impl Stapel {
 //     }
 // }
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Default)]
+#[repr(transparent)]
 struct Flip(u8);
+unsafe impl ValidAsZeroBits for Flip {}
 impl Flip {
     fn new(v: Option<u8>) -> Self {
         Self(v.unwrap_or(u8::MAX))
@@ -117,6 +122,11 @@ impl Flip {
 
     fn as_option(&self) -> Option<u8> {
         (self.0 < u8::MAX).then_some(self.0)
+    }
+}
+impl Display for Flip {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_option().map_or("None".to_string(), |n| n.to_string()))
     }
 }
 impl From<Option<u8>> for Flip {
@@ -168,6 +178,27 @@ fn print(mut stapel: Stapel, gesehen: &HashMap<Stapel, (u8, Flip)>) {
     }
 }
 
+fn print2(mut stapel: Stapel, gesehen: &HashMap<u64, (u8, Flip)>) {
+    println!("Anfangsstapel:");
+    let anfangs_groesse = stapel.stapel.len();
+    stapel.print(anfangs_groesse);
+    println!();
+
+    let mut stapel_to_print = stapel.clone();
+
+    while let Some(wende_und_ess_operation) = gesehen.get(&enumerate_permutation(stapel.stapel, &mut Default::default())).and_then(|(_, f)| f.as_option())
+    {
+        println!("Ess-und-Wende-Operation bei: {wende_und_ess_operation}");
+        stapel = stapel.wenden_und_essen(wende_und_ess_operation, true);
+        stapel_to_print = stapel_to_print.wenden_und_essen(wende_und_ess_operation, false);
+        stapel_to_print.print(anfangs_groesse);
+        println!();
+        if stapel.is_sorted() {
+            break;
+        }
+    }
+}
+
 // pub fn a3_a(eingabe: String) {
 //     let anfangs_stapel = Stapel::from(eingabe.as_str());
 //     let mut gesehen = HashMap::new();
@@ -210,36 +241,36 @@ macro_rules! exec_time {
     };
 }
 
-fn enumerate_permutation(mut x: Array, indeces: &mut Array) -> usize {
+fn enumerate_permutation(mut x: Array, indeces: &mut Array) -> u64 {
     let mut result = 0;
     indeces.truncate(0);
     for i in 0..x.len() {
-        let index = x.iter().position(|n| *n == i as u8).unwrap() as usize;
+        let index = x.iter().position(|n| *n == i as u8 + 1).unwrap() as usize;
         indeces.push(index as u8);
         x.remove(index);
     }
     let mut fact = 1;
     for (i, index) in indeces.iter().rev().enumerate() {
         if i > 1 {
-            fact *= i;
+            fact *= i as u64;
         }
-        result += *index as usize * fact;
+        result += *index as u64 * fact;
     }
     result
 }
 
 #[inline]
-fn permutation_by_enumeration(mut i: usize, n: usize, indeces: &mut Array) -> Array {
-    let mut fact = (1..=n).product::<usize>();
+fn permutation_by_enumeration(mut i: u64, n: u8, indeces: &mut Array) -> Array {
+    let mut fact = (1..=n as u64).product::<u64>();
     indeces.truncate(0);
     let mut result = Array::new();
     for j in 0..n {
-        fact /= n - j;
+        fact /= n as u64 - j as u64;
         indeces.push((i / fact) as u8);
         i %= fact;
     }
     for n in (0..n).rev() {
-        result.insert(indeces[n] as usize, n as u8 + 1);
+        result.insert(indeces[n as usize] as usize, n as u8 + 1);
     }
     result
 }
@@ -336,15 +367,18 @@ const BLOCKS: u32 = 64;
 
 #[repr(C)]
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Default)]
-struct Bestes(u64, u8, u8);
+struct Bestes(u64, u8, Flip);
 unsafe impl ValidAsZeroBits for Bestes {}
 
 fn a3_b2(limit: u8) {
     let start = Instant::now();
 
+    let mut worst_cases = Vec::new();
+    worst_cases.push(0);
+
     let device = CudaDeviceBuilder::new(0)
         .with_ptx(
-            Ptx::Image(include_bytes!("a/kernel.ptx").map(|b| b as i8).to_vec()),// r"bwinf41-2\a3\Quelltext\kernel.cu",
+            Ptx::Image(include_bytes!("a/kernel.ptx").to_vec().into_iter().map(|i| i as i8).collect_vec()), // r"bwinf41-2\a3\Quelltext\kernel.cu",
             "cuda",
             &["run_permutations"],
         )
@@ -352,19 +386,25 @@ fn a3_b2(limit: u8) {
         .unwrap();
     let run_permutations = device.get_func("cuda", "run_permutations").unwrap();
 
-    let mut prior = device.alloc_zeros_async(1).unwrap();
-    device.copy_into_async(vec![Bestes(0, 1, -1i8 as u8)], &mut prior).unwrap();
-    let mut current;
+    let mut prior = unsafe {device.alloc_async(1).unwrap()};
+    device
+        .copy_into_async(vec![(0, None.into())], &mut prior)
+        .unwrap();
+    let mut current: CudaSlice<(u8, Flip)>;
     let mut fact = 1;
-    let mut bestes_gefundene = device.alloc_zeros_async((THREADS * BLOCKS) as usize).unwrap();
-    let mut beste_box = Box::new([Bestes(0, 0, 0); (THREADS * BLOCKS) as usize]);
+    let mut bestes_gefundene = device
+        .alloc_zeros_async((THREADS * BLOCKS) as usize)
+        .unwrap();
+    let mut beste_box = Box::new([Bestes(0, 0, None.into()); (THREADS * BLOCKS) as usize]);
     let bestes = beste_box.as_mut_slice();
+
+    let mut gesehen = HashMap::new();
 
     for i in 2..=limit {
         fact *= i as u64;
-        let threads = if fact < 200 { 1 } else { THREADS };
-        let blocks = if fact < 1000 { 1 } else { BLOCKS };
-        current = device.alloc_zeros_async(fact as usize).unwrap();
+        let threads = if fact < THREADS as u64 { 1 } else { THREADS };
+        let blocks = if fact < (THREADS * BLOCKS) as u64 { 1 } else { BLOCKS };
+        current = unsafe{device.alloc_async(fact as usize).unwrap()};
         unsafe {
             run_permutations.clone().launch_async(
                 LaunchConfig {
@@ -377,19 +417,47 @@ fn a3_b2(limit: u8) {
         }
         .unwrap();
 
+        let mut gesehen_neu = vec![Default::default(); fact as usize];
+        device
+            .sync_copy_from(&current, gesehen_neu.as_mut_slice())
+            .unwrap();
+        gesehen.extend(
+            gesehen_neu
+                .into_iter().enumerate().map(|(i, b)| (i as u64, b))
+        );
         device.sync_copy_from(&bestes_gefundene, bestes).unwrap();
-        let Bestes(enumeration, laenge, flip) = bestes[..(threads * blocks) as usize].iter().max_by_key(|Bestes(_, laenge, _)| laenge).unwrap();
+        let Bestes(enumeration, laenge, flip) = bestes[..(threads * blocks) as usize]
+            .iter()
+            .max_by_key(|Bestes(_, laenge, _)| laenge)
+            .unwrap();
 
-        println!("A(s) = {laenge}");
-        println!("Last flip at {flip}");
-        println!("{enumeration}");
-        Stapel {stapel: permutation_by_enumeration(*enumeration as usize, i as usize, &mut Default::default())}.print(i as usize);
-        println!();
-        println!();
+        if laenge == &u8::MAX {
+            println!("Nothing found for {i}");
+        } else {
+            worst_cases.push(*laenge);
+            println!("P({i}) = {laenge}");
+            // println!("Last flip at {flip}");
+            // print2(Stapel {
+            //     stapel: permutation_by_enumeration(
+            //         *enumeration,
+            //         i,
+            //         &mut Default::default(),
+            //     ),
+            // }, &gesehen);
+            println!();
+        }
 
         prior = current;
     }
 
+    println!("{:^5} | {:^5}", "n", "P(n)");
+    println!("{:-^5}-+-{:-^5}", "", "");
+    for (n, pn) in worst_cases
+        .into_iter()
+        .enumerate()
+    {
+        println!("{:^5} | {:^5}", n + 1, pn);
+    }
     println!();
     println!("Ausführungsdauer: {}ms", start.elapsed().as_millis());
 }

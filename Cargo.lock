@@ -502,8 +502,7 @@ checksum = "b365fabc795046672053e29c954733ec3b05e4be654ab130fe8f1f94d7051f35"
 [[package]]
 name = "cudarc"
 version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb52202b5882cb796d6a960c16b8fb84380106d464025f6e3d46d08d3e9e7611"
+source = "git+https://github.com/M1ngXU/cudarc?branch=pr#98a6af8fddb4cb429a60115da709542af5f9f24f"
 dependencies = [
  "find_cuda_helper",
  "no-std-compat",

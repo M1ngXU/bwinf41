@@ -12,7 +12,7 @@ image = "0.24.5"
 imageproc = "0.23.0"
 bit-vec = "0.6.3"
 show-image = {version = "0.13.1", features = ["image", "save"]}
-cudarc = "0.6.1"
+cudarc = {git = "https://github.com/M1ngXU/cudarc", branch = "pr"}
 
 [lib]
 name = "aufgaben_helfer"
