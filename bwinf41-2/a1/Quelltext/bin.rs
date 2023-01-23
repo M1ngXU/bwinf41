@@ -1,15 +1,14 @@
 use bit_vec::BitVec;
 use image::{ImageBuffer, Rgb};
-use rayon::prelude::{IntoParallelIterator, ParallelBridge, ParallelIterator};
+use rand::{seq::SliceRandom, thread_rng};
+use rayon::prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use show_image::create_window;
 use std::{
     collections::{BinaryHeap, HashMap, HashSet},
     fmt::{Display, Formatter},
     hash::Hash,
-    io::Write,
     ops::Deref,
     sync::Arc,
-    time::Instant,
 };
 
 use aufgaben_helfer::loese_aufgabe;
@@ -40,14 +39,6 @@ impl Ort {
         let b = (zu.x - self.x, zu.y - self.y);
         let skalarprodukt = a.0 * b.0 + a.1 * b.1;
         skalarprodukt >= 0
-    }
-
-    fn nachfolger_orte(&self, von: &Self, offene_orte: &Vec<Self>) -> Vec<Self> {
-        offene_orte
-            .iter()
-            .filter(|zu| self.moegliche_abbiegung(von, zu))
-            .copied()
-            .collect()
     }
 
     fn kosten_zu(&self, zu: &Self) -> u64 {
@@ -96,7 +87,7 @@ fn best_pfad(orte: Vec<Ort>, kanten: HashMap<Kante, Vec<Kante>>) -> Wrapper {
     kanten
         .clone()
         .into_par_iter()
-        .find_map_any(|(start, nachfolger)| {
+        .filter_map(|(start, _)| {
             let mut warteschlange = BinaryHeap::<Wrapper>::new();
             let mut gesehen = HashSet::<OrtNachKosten>::new();
             let mut besucht = BitVec::from_elem(orte.len(), false);
@@ -109,7 +100,6 @@ fn best_pfad(orte: Vec<Ort>, kanten: HashMap<Kante, Vec<Kante>>) -> Wrapper {
                 start.von.kosten_zu(&start.zu),
                 vec![start],
             ));
-
             while let Some(naechster) = warteschlange.pop() {
                 if gesehen.contains(&naechster) {
                     continue;
@@ -146,7 +136,7 @@ fn best_pfad(orte: Vec<Ort>, kanten: HashMap<Kante, Vec<Kante>>) -> Wrapper {
             }
             None
         })
-        //.max_by_key(|n| n.1)
+        .max_by_key(|n| n.1)
         .unwrap()
 }
 
@@ -227,6 +217,44 @@ struct Pfad {
     besucht: u64,
 }
 
+const TRIES: usize = 100;
+fn random_pfad(orte: Vec<Ort>, kanten: HashMap<Kante, Vec<Kante>>) -> Wrapper {
+    let mut kanten_vec = kanten.clone().into_iter().collect_vec();
+    (0..TRIES)
+        .into_par_iter()
+        .find_map_any(|_| {
+            kanten_vec
+                .par_iter()
+                .find_map_any(|(start, starting_nexts)| {
+                    let mut rng = thread_rng();
+                    let mut possible_nexts = starting_nexts;
+                    let mut result = Wrapper(
+                        OrtNachKosten {
+                            besucht: BitVec::from_elem(orte.len(), false),
+                            ort: *start,
+                        },
+                        start.von.kosten_zu(&start.zu),
+                        vec![*start],
+                    );
+                    result.0.besucht.set(start.zu.i, true);
+                    // check that everything is visited
+                    while start.von != result.0.ort.zu {
+                        result.0.ort = **possible_nexts
+                            .iter()
+                            .filter(|n| result.0.besucht.get(n.zu.i).filter(|b| !b).is_some())
+                            .collect_vec()
+                            .choose(&mut rng)?;
+                        result.0.besucht.set(result.0.ort.zu.i, true);
+                        result.1 += result.0.ort.von.kosten_zu(&result.0.ort.zu);
+                        result.2.push(result.0.ort);
+                        possible_nexts = kanten.get(&result.0.ort)?;
+                    }
+                    Some(result)
+                })
+        })
+        .unwrap()
+}
+
 pub fn a1(eingabe: String) {
     let orte = eingabe
         .trim_start_matches('\u{feff}') // manchmal gibt es ein BOM am Anfang eines Strings
@@ -244,73 +272,9 @@ pub fn a1(eingabe: String) {
         .map(|((a, b), c)| (a, b, c))
         .filter(|(a, b, c)| a != b && a != c && b != c)
         .filter(|(a, b, c)| b.moegliche_abbiegung(a, c))
-        .map(|(a, b, c)| {
-            (
-                KantenIndex {
-                    von: 1 << a.i as u64,
-                    zu: 1 << b.i as u64,
-                },
-                1 << c.i as u64,
-            )
-        })
-        .into_grouping_map()
-        .fold(0, |acc, _, cur| acc | cur);
-    let mut elapsed = Instant::now();
-    let mut kombinationen = kanten
-        .iter()
-        .flat_map(|(von, zu)| {
-            (0..u64::BITS)
-                .filter(|n| ((1 << n) & *zu) != 0)
-                .map(|n| KantenIndex {
-                    von: von.zu,
-                    zu: 1 << n,
-                })
-                .map(|zu| (*von, zu))
-        })
-        .map(|(von, zu)| Pfad {
-            anfang: von,
-            ende: zu,
-            anfang_mitte: None,
-            ende_mitte: None,
-            besucht: von.von & von.zu & zu.zu,
-        })
-        .collect::<Vec<_>>();
-    println!("{}, after {:?}", kombinationen.len(), elapsed.elapsed());
-    std::io::Write::flush(&mut std::io::stdout()).unwrap();
-    elapsed = Instant::now();
-    kombinationen = kombinationen
-        .into_iter()
-        .tuple_combinations()
-        .flat_map(|(p1, p2)| [(p1.clone(), p2.clone()), (p2, p1)])
-        .filter(|(p1, p2)| (p1.besucht & p2.besucht) == 0)
-        .filter(|(p1, p2)| (kanten.get(&p1.ende).unwrap_or(&0) & p2.anfang.von) != 0)
-        .map(|(p1, p2)| {
-            Pfad {
-                anfang: p1.anfang,
-                ende: p2.ende,
-                besucht: p1.besucht | p2.besucht,
-                anfang_mitte: None, //Some(p1.clone()),
-                ende_mitte: None,   //Some(p2.clone()),
-            }
-        })
-        .collect();
-    println!("{}, after {:?}", kombinationen.len(), elapsed.elapsed());
-    std::io::Write::flush(&mut std::io::stdout()).unwrap();
-    elapsed = Instant::now();
-    println!(
-        "{}",
-        kombinationen
-            .into_iter()
-            .tuple_combinations()
-            .par_bridge()
-            .into_par_iter()
-            .flat_map(|(p1, p2)| [(p1.clone(), p2.clone()), (p2, p1)])
-            .filter(|(p1, p2)| (p1.besucht & p2.besucht) == 0)
-            .filter(|(p1, p2)| (kanten.get(&p1.ende).unwrap_or(&0) & p2.anfang.von) != 0)
-            .count()
-    );
-    // let bester_pfad = best_pfad(orte.clone(), kanten.clone());
-    // display(orte, bester_pfad);
+        .map(|(a, b, c)| (Kante { von: a, zu: b }, Kante { von: b, zu: c }))
+        .into_group_map();
+    display(orte.clone(), dbg!(best_pfad(orte, kanten)));
 }
 
 #[show_image::main]
@@ -318,3 +282,327 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     loese_aufgabe(a1);
     Ok(())
 }
+
+
+
+// Bester pfad fuer 4:
+// best_pfad(orte, kanten) = Wrapper(
+//     OrtNachKosten {
+//         besucht: 1111111111111111111111111,
+//         ort: Kante {
+//             von: Ort {
+//                 x: -137317503,
+//                 y: -20146939,
+//                 i: 14,
+//             },
+//             zu: Ort {
+//                 x: -240369194,
+//                 y: 57426131,
+//                 i: 22,
+//             },
+//         },
+//     },
+//     158561921299459361,
+//     [
+//         Kante {
+//             von: Ort {
+//                 x: -240369194,
+//                 y: 57426131,
+//                 i: 22,
+//             },
+//             zu: Ort {
+//                 x: 144832862,
+//                 y: -43476284,
+//                 i: 9,
+//             },
+//         },
+//         Kante {
+//             von: Ort {
+//                 x: 144832862,
+//                 y: -43476284,
+//                 i: 9,
+//             },
+//             zu: Ort {
+//                 x: 153130159,
+//                 y: -20360910,
+//                 i: 2,
+//             },
+//         },
+//         Kante {
+//             von: Ort {
+//                 x: 153130159,
+//                 y: -20360910,
+//                 i: 2,
+//             },
+//             zu: Ort {
+//                 x: -154088455,
+//                 y: 115022553,
+//                 i: 7,
+//             },
+//         },
+//         Kante {
+//             von: Ort {
+//                 x: -154088455,
+//                 y: 115022553,
+//                 i: 7,
+//             },
+//             zu: Ort {
+//                 x: -221149792,
+//                 y: -32862538,
+//                 i: 23,
+//             },
+//         },
+//         Kante {
+//             von: Ort {
+//                 x: -221149792,
+//                 y: -32862538,
+//                 i: 23,
+//             },
+//             zu: Ort {
+//                 x: -129104485,
+//                 y: -155041640,
+//                 i: 3,
+//             },
+//         },
+//         Kante {
+//             von: Ort {
+//                 x: -129104485,
+//                 y: -155041640,
+//                 i: 3,
+//             },
+//             zu: Ort {
+//                 x: 42137753,
+//                 y: -60319863,
+//                 i: 21,
+//             },
+//         },
+//         Kante {
+//             von: Ort {
+//                 x: 42137753,
+//                 y: -60319863,
+//                 i: 21,
+//             },
+//             zu: Ort {
+//                 x: 33379688,
+//                 y: 100161238,
+//                 i: 24,
+//             },
+//         },
+//         Kante {
+//             von: Ort {
+//                 x: 33379688,
+//                 y: 100161238,
+//                 i: 24,
+//             },
+//             zu: Ort {
+//                 x: -119026308,
+//                 y: 168453598,
+//                 i: 19,
+//             },
+//         },
+//         Kante {
+//             von: Ort {
+//                 x: -119026308,
+//                 y: 168453598,
+//                 i: 19,
+//             },
+//             zu: Ort {
+//                 x: -219148505,
+//                 y: 103685337,
+//                 i: 17,
+//             },
+//         },
+//         Kante {
+//             von: Ort {
+//                 x: -219148505,
+//                 y: 103685337,
+//                 i: 17,
+//             },
+//             zu: Ort {
+//                 x: -191716829,
+//                 y: -28360492,
+//                 i: 12,
+//             },
+//         },
+//         Kante {
+//             von: Ort {
+//                 x: -191716829,
+//                 y: -28360492,
+//                 i: 12,
+//             },
+//             zu: Ort {
+//                 x: 51008140,
+//                 y: 5769601,
+//                 i: 20,
+//             },
+//         },
+//         Kante {
+//             von: Ort {
+//                 x: 51008140,
+//                 y: 5769601,
+//                 i: 20,
+//             },
+//             zu: Ort {
+//                 x: 101498782,
+//                 y: 33484198,
+//                 i: 4,
+//             },
+//         },
+//         Kante {
+//             von: Ort {
+//                 x: 101498782,
+//                 y: 33484198,
+//                 i: 4,
+//             },
+//             zu: Ort {
+//                 x: 139446709,
+//                 y: 233238,
+//                 i: 8,
+//             },
+//         },
+//         Kante {
+//             von: Ort {
+//                 x: 139446709,
+//                 y: 233238,
+//                 i: 8,
+//             },
+//             zu: Ort {
+//                 x: 94789917,
+//                 y: -67087689,
+//                 i: 15,
+//             },
+//         },
+//         Kante {
+//             von: Ort {
+//                 x: 94789917,
+//                 y: -67087689,
+//                 i: 15,
+//             },
+//             zu: Ort {
+//                 x: -82864121,
+//                 y: -104173600,
+//                 i: 1,
+//             },
+//         },
+//         Kante {
+//             von: Ort {
+//                 x: -82864121,
+//                 y: -104173600,
+//                 i: 1,
+//             },
+//             zu: Ort {
+//                 x: -98760442,
+//                 y: -81770618,
+//                 i: 18,
+//             },
+//         },
+//         Kante {
+//             von: Ort {
+//                 x: -98760442,
+//                 y: -81770618,
+//                 i: 18,
+//             },
+//             zu: Ort {
+//                 x: -16723130,
+//                 y: -12689542,
+//                 i: 5,
+//             },
+//         },
+//         Kante {
+//             von: Ort {
+//                 x: -16723130,
+//                 y: -12689542,
+//                 i: 5,
+//             },
+//             zu: Ort {
+//                 x: -20971208,
+//                 y: -5637107,
+//                 i: 10,
+//             },
+//         },
+//         Kante {
+//             von: Ort {
+//                 x: -20971208,
+//                 y: -5637107,
+//                 i: 10,
+//             },
+//             zu: Ort {
+//                 x: -239848226,
+//                 y: 8671399,
+//                 i: 6,
+//             },
+//         },
+//         Kante {
+//             von: Ort {
+//                 x: -239848226,
+//                 y: 8671399,
+//                 i: 6,
+//             },
+//             zu: Ort {
+//                 x: -239414022,
+//                 y: 40427118,
+//                 i: 11,
+//             },
+//         },
+//         Kante {
+//             von: Ort {
+//                 x: -239414022,
+//                 y: 40427118,
+//                 i: 11,
+//             },
+//             zu: Ort {
+//                 x: -107988514,
+//                 y: 185173669,
+//                 i: 16,
+//             },
+//         },
+//         Kante {
+//             von: Ort {
+//                 x: -107988514,
+//                 y: 185173669,
+//                 i: 16,
+//             },
+//             zu: Ort {
+//                 x: 20212169,
+//                 y: 156013261,
+//                 i: 0,
+//             },
+//         },
+//         Kante {
+//             von: Ort {
+//                 x: 20212169,
+//                 y: 156013261,
+//                 i: 0,
+//             },
+//             zu: Ort {
+//                 x: 28913721,
+//                 y: 58699880,
+//                 i: 13,
+//             },
+//         },
+//         Kante {
+//             von: Ort {
+//                 x: 28913721,
+//                 y: 58699880,
+//                 i: 13,
+//             },
+//             zu: Ort {
+//                 x: -137317503,
+//                 y: -20146939,
+//                 i: 14,
+//             },
+//         },
+//         Kante {
+//             von: Ort {
+//                 x: -137317503,
+//                 y: -20146939,
+//                 i: 14,
+//             },
+//             zu: Ort {
+//                 x: -240369194,
+//                 y: 57426131,
+//                 i: 22,
+//             },
+//         },
+//     ],
+// )
