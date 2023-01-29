@@ -1,7 +1,17 @@
-use bit_vec::BitVec;
 use image::{ImageBuffer, Rgb};
-use rand::{seq::SliceRandom, thread_rng};
-use rayon::prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use rand::{
+    distributions::Uniform,
+    prelude::Distribution,
+    seq::{IteratorRandom, SliceRandom},
+    thread_rng, Rng,
+};
+use rayon::{
+    prelude::{
+        IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelBridge,
+        ParallelIterator,
+    },
+    slice::ParallelSliceMut,
+};
 use show_image::create_window;
 use std::{
     collections::{BinaryHeap, HashMap, HashSet},
@@ -9,6 +19,7 @@ use std::{
     hash::Hash,
     ops::Deref,
     sync::Arc,
+    time::Instant,
 };
 
 use aufgaben_helfer::loese_aufgabe;
@@ -19,7 +30,7 @@ use itertools::Itertools;
 struct Ort {
     x: i64,
     y: i64,
-    i: usize,
+    s: u128,
 }
 impl Display for Ort {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -38,7 +49,7 @@ impl Ort {
         let a = (self.x - von.x, self.y - von.y);
         let b = (zu.x - self.x, zu.y - self.y);
         let skalarprodukt = a.0 * b.0 + a.1 * b.1;
-        skalarprodukt >= 0
+        skalarprodukt > 0
     }
 
     fn kosten_zu(&self, zu: &Self) -> u64 {
@@ -46,12 +57,12 @@ impl Ort {
     }
 }
 
-#[derive(Clone, Hash, Debug, PartialEq, Eq)]
+#[derive(Default, Clone, Hash, Debug, PartialEq, Eq)]
 struct OrtNachKosten {
-    besucht: BitVec,
-    ort: Kante,
+    besucht: u128,
+    current: Kante,
 }
-#[derive(Clone, Hash, Debug)]
+#[derive(Clone, Hash, Debug, Default)]
 struct Wrapper(OrtNachKosten, u64, Vec<Kante>);
 impl Deref for Wrapper {
     type Target = OrtNachKosten;
@@ -84,18 +95,19 @@ struct Kante {
 }
 
 fn best_pfad(orte: Vec<Ort>, kanten: HashMap<Kante, Vec<Kante>>) -> Wrapper {
+    let leer = u128::MAX ^ (1 << orte.len() - 1);
     kanten
         .clone()
         .into_par_iter()
         .filter_map(|(start, _)| {
             let mut warteschlange = BinaryHeap::<Wrapper>::new();
             let mut gesehen = HashSet::<OrtNachKosten>::new();
-            let mut besucht = BitVec::from_elem(orte.len(), false);
-            besucht.set(start.zu.i, true);
+            let mut besucht = leer;
+            besucht |= 1 << start.zu.s;
             warteschlange.push(Wrapper(
                 OrtNachKosten {
                     besucht,
-                    ort: start,
+                    current: start,
                 },
                 start.von.kosten_zu(&start.zu),
                 vec![start],
@@ -106,30 +118,28 @@ fn best_pfad(orte: Vec<Ort>, kanten: HashMap<Kante, Vec<Kante>>) -> Wrapper {
                 } else {
                     gesehen.insert(naechster.clone().0);
                 }
-                if naechster.besucht.all() {
+                if naechster.besucht == u128::MAX {
                     assert_eq!(naechster.2[0].von, naechster.2[orte.len() - 1].zu);
                     return Some(naechster);
                 }
-                for naechster_ort in kanten
-                    .get(&naechster.ort)
-                    .into_iter()
-                    .flatten()
-                    .filter(|k| {
-                        !naechster.besucht[k.zu.i]
-                            && (k.zu != start.von
-                                || naechster.besucht.iter().filter(|x| !*x).count() == 1)
-                    })
+                for naechster_ort in
+                    kanten
+                        .get(&naechster.current)
+                        .into_iter()
+                        .flatten()
+                        .filter(|k| {
+                            (naechster.besucht & k.zu.s) == 0
+                                && (k.zu != start.von || naechster.besucht.count_zeros() == 1)
+                        })
                 {
-                    let mut besucht = naechster.besucht.clone();
-                    besucht.set(naechster_ort.zu.i, true);
                     let mut pfad = naechster.2.clone();
                     pfad.push(*naechster_ort);
                     warteschlange.push(Wrapper(
                         OrtNachKosten {
-                            ort: *naechster_ort,
-                            besucht,
+                            current: *naechster_ort,
+                            besucht: besucht | naechster_ort.zu.s,
                         },
-                        naechster.1 + naechster.ort.zu.kosten_zu(&naechster_ort.von),
+                        naechster.1 + naechster.current.zu.kosten_zu(&naechster_ort.von),
                         pfad,
                     ))
                 }
@@ -141,6 +151,8 @@ fn best_pfad(orte: Vec<Ort>, kanten: HashMap<Kante, Vec<Kante>>) -> Wrapper {
 }
 
 fn display(orte: Vec<Ort>, bester_pfad: Wrapper) {
+    println!("Kosten: {}", bester_pfad.1);
+
     let scale = 500_000;
     let min_x = orte.iter().map(|o| o.x).min().unwrap_or_default() / scale;
     let min_y = orte.iter().map(|o| o.y).min().unwrap_or_default() / scale;
@@ -217,42 +229,158 @@ struct Pfad {
     besucht: u64,
 }
 
-const TRIES: usize = 100;
-fn random_pfad(orte: Vec<Ort>, kanten: HashMap<Kante, Vec<Kante>>) -> Wrapper {
-    let mut kanten_vec = kanten.clone().into_iter().collect_vec();
-    (0..TRIES)
-        .into_par_iter()
-        .find_map_any(|_| {
-            kanten_vec
-                .par_iter()
-                .find_map_any(|(start, starting_nexts)| {
-                    let mut rng = thread_rng();
-                    let mut possible_nexts = starting_nexts;
-                    let mut result = Wrapper(
-                        OrtNachKosten {
-                            besucht: BitVec::from_elem(orte.len(), false),
-                            ort: *start,
-                        },
-                        start.von.kosten_zu(&start.zu),
-                        vec![*start],
-                    );
-                    result.0.besucht.set(start.zu.i, true);
-                    // check that everything is visited
-                    while start.von != result.0.ort.zu {
-                        result.0.ort = **possible_nexts
-                            .iter()
-                            .filter(|n| result.0.besucht.get(n.zu.i).filter(|b| !b).is_some())
-                            .collect_vec()
-                            .choose(&mut rng)?;
-                        result.0.besucht.set(result.0.ort.zu.i, true);
-                        result.1 += result.0.ort.von.kosten_zu(&result.0.ort.zu);
-                        result.2.push(result.0.ort);
-                        possible_nexts = kanten.get(&result.0.ort)?;
-                    }
-                    Some(result)
-                })
+const TRIES: usize = 1_000;
+fn random_pfad(orte: Vec<Ort>, kanten: HashMap<Kante, Vec<Kante>>) -> Option<Wrapper> {
+    let kanten_vec = kanten.clone().into_iter().collect_vec();
+    let leer = u128::MAX ^ ((1 << orte.len()) - 1);
+    (0..TRIES).into_par_iter().find_map_any(|_| {
+        kanten_vec
+            .par_iter()
+            .find_map_any(|(start, starting_nexts)| {
+                let mut rng = thread_rng();
+                let mut possible_nexts = starting_nexts;
+                let mut result = Wrapper(
+                    OrtNachKosten {
+                        besucht: leer,
+                        current: *start,
+                    },
+                    start.von.kosten_zu(&start.zu),
+                    vec![*start],
+                );
+                result.0.besucht |= start.zu.s;
+                // check that everything is visited
+                while result.0.besucht != u128::MAX {
+                    result.0.current = **possible_nexts
+                        .iter()
+                        .filter(|n| {
+                            ((result.0.besucht & n.zu.s) == 0)
+                                && (start.von != n.zu || result.0.besucht.count_zeros() == 1)
+                        })
+                        .collect_vec()
+                        .choose(&mut rng)?;
+                    result.0.besucht |= result.0.current.zu.s;
+                    result.1 += result.0.current.von.kosten_zu(&result.0.current.zu);
+                    result.2.push(result.0.current);
+                    possible_nexts = kanten.get(&result.0.current)?;
+                }
+                Some(result)
+            })
+    })
+}
+
+fn get_fehler(pfad: &Vec<Ort>, kanten: &HashMap<Kante, u128>, a: usize, b: usize, max_distance: u64) -> u64 {
+    (0..pfad.len() + 1)
+        .map(|i| {
+            let i = i % pfad.len();
+            pfad[if i == a {
+                b
+            } else if i == b {
+                a
+            } else {
+                i
+            }]
         })
-        .unwrap()
+        .tuple_windows()
+        .map(|(von, uber, zu)| {
+            (von.kosten_zu(&uber), kanten
+                .get(&Kante {
+                    von: von,
+                    zu: uber,
+                })
+                .filter(|kanten| (**kanten & zu.s) != 0)
+                .is_none())
+        })
+        .fold(0, |a, (k, m)| a + k + if m {max_distance} else {0})
+}
+
+fn pfad_sortieren(orte: Vec<Ort>, kanten: HashMap<Kante, Vec<Kante>>) -> Option<Wrapper> {
+    let max_distance = orte.iter().cartesian_product(&orte).map(|(a, b)| a.kosten_zu(b)).max().unwrap();
+    let mut pfad = orte.clone();
+    let mut rng = thread_rng();
+    let kanten = kanten
+        .into_iter()
+        .map(|(von, zu)| {
+            (
+                von,
+                zu.into_iter()
+                    .map(|k| k.zu.s)
+                    .reduce(|a, b| a | b)
+                    .unwrap_or(0),
+            )
+        })
+        .collect::<HashMap<Kante, u128>>();
+    pfad.shuffle(&mut rng);
+    let uniform = Uniform::new(0.0f32, 1.0);
+    let dalpha = 0.0001;
+    let mut alpha = dalpha;
+    let indeces = (0..pfad.len())
+        .cartesian_product(0..pfad.len())
+        .collect_vec();
+    let mut fehler = indeces.iter().map(|(a, b)| ((*a, *b), 0)).collect_vec();
+    let mut lookup = HashSet::from([pfad.clone()]);
+    let mut start;
+    let mut elapsed = 0;
+    let mut counter = 0u128;
+    let mut clashes = 0;
+    let mut letzte_verbesserung = 0;
+    let mut letztes_bestes = u64::MAX;
+    loop {
+        start = Instant::now();
+        indeces
+            .par_iter()
+            .map(|(a, b)| ((*a, *b), get_fehler(&pfad, &kanten, *a, *b, max_distance)))
+            .collect_into_vec(&mut fehler);
+        fehler.sort_unstable_by_key(|(_, w)| *w);
+        elapsed += start.elapsed().as_nanos();
+        let rand = (1.0 - uniform.sample(&mut rng)).ln() / -alpha;
+        let i = rand.floor() as usize % fehler.len();
+        let mut j = i;
+        let ((mut a, mut b), mut w) = fehler[i];
+        pfad.swap(a, b);
+        while !lookup.insert(pfad.clone()) {
+            pfad.swap(a, b);
+            ((a, b), w) = fehler[j];
+            j+=1;
+            j%=fehler.len();
+            if j==i{return None;}
+            pfad.swap(a, b);
+            clashes += 1;
+        }
+        if letztes_bestes == w {
+            letzte_verbesserung += 1;
+            if letzte_verbesserung == 500 {
+                alpha /= 10.0;
+                letzte_verbesserung = 0;
+                println!("Pushdown");
+            }
+        } else {
+            letzte_verbesserung = 0;
+        }
+        letztes_bestes = w / max_distance;
+        counter += 1;
+        if counter % 10 == 0 {
+            println!("{alpha:.3}|{}|{clashes}clashes|{}ns", w / max_distance, elapsed / 10);
+            elapsed = 0;
+        }
+        alpha += dalpha;
+        if w == 0 {
+            break;
+        }
+    }
+    let pfad = pfad
+        .into_iter()
+        .circular_tuple_windows()
+        .take(orte.len() + 1)
+        .map(|(von, zu)| Kante { von, zu })
+        .collect_vec();
+    Some(Wrapper(
+        OrtNachKosten {
+            current: pfad[0],
+            ..Default::default()
+        },
+        pfad.iter().map(|Kante { von, zu }| von.kosten_zu(zu)).sum(),
+        pfad,
+    ))
 }
 
 pub fn a1(eingabe: String) {
@@ -262,7 +390,11 @@ pub fn a1(eingabe: String) {
         .map(|n| n.replacen('.', "", 1).parse::<i64>().expect("Keine Zahl!"))
         .tuples()
         .enumerate()
-        .map(|(i, (x, y))| Ort { x, y, i })
+        .map(|(i, (x, y))| Ort {
+            x,
+            y,
+            s: 1 << i as u128,
+        })
         .collect_vec();
     let kanten = orte
         .iter()
@@ -274,7 +406,9 @@ pub fn a1(eingabe: String) {
         .filter(|(a, b, c)| b.moegliche_abbiegung(a, c))
         .map(|(a, b, c)| (Kante { von: a, zu: b }, Kante { von: b, zu: c }))
         .into_group_map();
-    display(orte.clone(), dbg!(best_pfad(orte, kanten)));
+    if let Some(pfad) = pfad_sortieren(orte.clone(), kanten) {
+        display(orte.clone(), pfad);
+    }
 }
 
 #[show_image::main]
@@ -282,8 +416,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     loese_aufgabe(a1);
     Ok(())
 }
-
-
 
 // Bester pfad fuer 4:
 // best_pfad(orte, kanten) = Wrapper(
