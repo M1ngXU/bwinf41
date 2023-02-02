@@ -417,6 +417,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+struct Pfad2 {
+    /// ohne letztes == anfang
+    orte: Vec<Ort>,
+    /// kantenweise => fehler_bis.len() - 2 - 1 == orte.len();
+    /// - 2: drei orte == eine kante => 2 orte "weniger"
+    /// - 1: letzter ort => anfangsort
+    fehler_bis: Vec<u8>
+}
+struct Fenster {
+    von: u8,
+    breite: u8,
+    zu: u8
+}
+impl Fenster {
+    fn fehler_auf_pfad(&self, kanten: HashMap<Kante, u128>, pfad: &Pfad2) -> u8 {
+        let neue_kosten_links = if self.zu >= 2 {pfad.fehler_bis[self.zu as usize - 2]}else{0};
+        let neue_kosten_mitte = if self.breite >= 2 {pfad.fehler_bis[self.zu as usize + self.breite as usize] - pfad.fehler_bis[self.zu as usize]} else{0};
+        let neue_kosten_rechts = if self.zu as usize + 2 < pfad.orte.len(){pfad.fehler_bis.last().unwrap() - pfad.fehler_bis[self.zu as usize + 2]}else{0};
+        let kosten_grenze_links0 = if self.zu >= 2 && (self.breite >= 1 || self.zu as usize + self.breite as usize <= pfad.orte.len() - 1 + 1) {kanten.get(&Kante{von: pfad.orte[self.zu as usize - 2], zu: pfad.orte[self.zu as usize - 1]}).filter(|o| pfad.orte[self.von as usize].s & **o != 0).map(|n| 1).unwrap_or(0)} else {0};
+        let kosten_grenze_links1 = if self.zu >= 1 && (self.breite >= 2 || self.zu as usize + self.breite as usize <= pfad.orte.len() - 1 + 1) {kanten.get(&Kante{von: pfad.orte[self.zu as usize - 1], zu: pfad.orte[self.von as usize]}).filter(|o| pfad.orte[self.von as usize + 1].s & **o != 0).map(|n| 1).unwrap_or(0)} else {0};
+        let kosten_grenze_rechts0 = if self.zu as usize <= pfad.orte.len() - 1 + 1 && (self.breite >= 2  || (self.breite >= self.zu && self.zu - self.breite >= 1)){kanten.get(&Kante{von: pfad.orte[self.zu as usize + self.breite as usize - 1], zu: pfad.orte[self.zu as usize + self.breite as usize]}).filter(|o| pfad.orte[self.zu as usize + self.breite as usize + 1].s & **o != 0).map(|n| 1).unwrap_or(0)}else{0};
+        let kosten_grenze_rechts1 = if self.zu as usize <= pfad.orte.len() - 1 + 1 - 1 && (self.breite >= 1  || (self.breite >= self.zu && self.zu - self.breite >= 0)){kanten.get(&Kante{von: pfad.orte[self.zu as usize + self.breite as usize], zu: pfad.orte[self.zu as usize + self.breite as usize + 1]}).filter(|o| pfad.orte[self.zu as usize + self.breite as usize + 2].s & **o != 0).map(|n| 1).unwrap_or(0)}else{0};
+        neue_kosten_links + neue_kosten_mitte + neue_kosten_rechts + kosten_grenze_links0 + kosten_grenze_links1 + kosten_grenze_rechts0 + kosten_grenze_rechts1
+    }
+}
+
 // Bester pfad fuer 4:
 // best_pfad(orte, kanten) = Wrapper(
 //     OrtNachKosten {

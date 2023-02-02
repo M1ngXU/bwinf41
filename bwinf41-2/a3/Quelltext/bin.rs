@@ -1,3 +1,4 @@
+#[cfg(feature = "gpu")]
 use cudarc::{
     nvrtc::Ptx,
     prelude::{CudaDeviceBuilder, CudaSlice, LaunchAsync, LaunchConfig, ValidAsZeroBits},
@@ -114,6 +115,7 @@ impl Stapel {
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Default)]
 #[repr(transparent)]
 struct Flip(u8);
+#[cfg(feature = "gpu")]
 unsafe impl ValidAsZeroBits for Flip {}
 impl Flip {
     fn new(v: Option<u8>) -> Self {
@@ -275,7 +277,8 @@ fn permutation_by_enumeration(mut i: u64, n: u8, indeces: &mut Array) -> Array {
     result
 }
 
-pub fn a3_b1(limit: u8) {
+#[cfg(not(feature = "gpu"))]
+pub fn a3_b(limit: u8) {
     let start = Instant::now();
 
     let mut gesehen = HashMap::with_capacity(
@@ -368,9 +371,11 @@ const BLOCKS: u32 = 64;
 #[repr(C)]
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Default)]
 struct Bestes(u64, u8, Flip);
+#[cfg(feature = "cuda")]
 unsafe impl ValidAsZeroBits for Bestes {}
 
-fn a3_b2(limit: u8) {
+#[cfg(feature = "cuda")]
+fn a3_b(limit: u8) {
     let start = Instant::now();
 
     let mut worst_cases = Vec::new();
@@ -467,7 +472,7 @@ fn main() {
     // println!("{:?}", permutation_by_enumeration(37, 5));
     // panic!();
     match std::env::args().nth(1).and_then(|n| n.parse::<u8>().ok()) {
-        Some(limit) if std::env::args().count() == 2 => a3_b2(limit),
+        Some(limit) if std::env::args().count() == 2 => a3_b(limit),
         _ => todo!(), //loese_aufgabe(a3_a),
     }
 }
